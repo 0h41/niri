@@ -740,6 +740,8 @@ mod tests {
                     top 3
                 }
 
+                edge-aware-struts
+
                 center-focused-column "on-overflow"
 
                 default-column-display "tabbed"
@@ -1378,6 +1380,7 @@ mod tests {
                 ],
                 center_focused_column: OnOverflow,
                 always_center_single_column: false,
+                edge_aware_struts: true,
                 empty_workspace_above_first: false,
                 default_column_display: Tabbed,
                 gaps: 8.0,

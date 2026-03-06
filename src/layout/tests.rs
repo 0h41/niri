@@ -3417,6 +3417,420 @@ fn preset_column_width_reset_after_set_width() {
     assert_eq!(win.requested_size().unwrap().w, 500);
 }
 
+fn edge_aware_struts_layout_part(enabled: bool) -> niri_config::LayoutPart {
+    niri_config::LayoutPart {
+        edge_aware_struts: Some(Flag(enabled)),
+        struts: Some(Struts {
+            left: FloatOrInt(100.),
+            right: FloatOrInt(100.),
+            top: FloatOrInt(0.),
+            bottom: FloatOrInt(0.),
+        }),
+        ..Default::default()
+    }
+}
+
+fn edge_aware_struts_small_columns_layout_part(enabled: bool) -> niri_config::LayoutPart {
+    niri_config::LayoutPart {
+        default_column_width: Some(niri_config::DefaultPresetSize(Some(
+            niri_config::PresetSize::Fixed(200),
+        ))),
+        ..edge_aware_struts_layout_part(enabled)
+    }
+}
+
+#[test]
+fn edge_aware_struts_output_override_left_pins_first_column_without_resizing() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(false))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::CompleteAnimations,
+    ];
+    let layout_without = check_ops(ops);
+    let rect_without = layout_without
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+    let width_without = layout_without
+        .windows()
+        .find(|(_, win)| win.0.id == 1)
+        .unwrap()
+        .1
+        .requested_size()
+        .unwrap()
+        .w;
+
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::CompleteAnimations,
+    ];
+    let layout_with = check_ops(ops);
+    let rect_with = layout_with
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+    let width_with = layout_with
+        .windows()
+        .find(|(_, win)| win.0.id == 1)
+        .unwrap()
+        .1
+        .requested_size()
+        .unwrap()
+        .w;
+
+    assert!(rect_without.loc.x > 0.);
+    assert_eq!(rect_with.loc.x, 0.);
+    assert_eq!(width_with, width_without);
+}
+
+#[test]
+fn edge_aware_struts_output_override_right_pins_last_column_without_resizing() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(false))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::SetColumnWidth(SizeChange::SetFixed(800)),
+        Op::Communicate(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::SetColumnWidth(SizeChange::SetFixed(800)),
+        Op::Communicate(2),
+        Op::FocusColumnFirst,
+        Op::FocusColumnLast,
+    ];
+    let layout_without = check_ops(ops);
+    let rect_without = layout_without
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+    let width_without = layout_without
+        .windows()
+        .find(|(_, win)| win.0.id == 2)
+        .unwrap()
+        .1
+        .requested_size()
+        .unwrap()
+        .w;
+
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::SetColumnWidth(SizeChange::SetFixed(800)),
+        Op::Communicate(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::SetColumnWidth(SizeChange::SetFixed(800)),
+        Op::Communicate(2),
+        Op::FocusColumnFirst,
+        Op::FocusColumnLast,
+    ];
+    let layout_with = check_ops(ops);
+    let rect_with = layout_with
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+    let width_with = layout_with
+        .windows()
+        .find(|(_, win)| win.0.id == 2)
+        .unwrap()
+        .1
+        .requested_size()
+        .unwrap()
+        .w;
+
+    assert!(rect_without.loc.x + rect_without.size.w < 1280.);
+    assert_eq!(rect_with.loc.x + rect_with.size.w, 1280.);
+    assert_eq!(width_with, width_without);
+}
+
+#[test]
+fn edge_aware_struts_does_not_move_last_column_when_all_columns_fit() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_small_columns_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::CompleteAnimations,
+    ];
+    let layout_before = check_ops(ops);
+    let view_pos_before = layout_before
+        .active_workspace()
+        .unwrap()
+        .scrolling()
+        .target_view_pos();
+
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_small_columns_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::CompleteAnimations,
+        Op::FocusColumnLast,
+    ];
+    let layout_after = check_ops(ops);
+    let view_pos_after = layout_after
+        .active_workspace()
+        .unwrap()
+        .scrolling()
+        .target_view_pos();
+
+    assert_eq!(view_pos_after, view_pos_before);
+}
+
+#[test]
+fn edge_aware_struts_workspace_override_wins_over_output() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::SetWorkspaceName {
+            new_ws_name: 1,
+            ws_name: None,
+        },
+        Op::UpdateWorkspaceLayoutConfig {
+            ws_name: 1,
+            layout_config: Some(Box::new(niri_config::LayoutPart {
+                edge_aware_struts: Some(Flag(false)),
+                ..Default::default()
+            })),
+        },
+        Op::FocusColumnFirst,
+    ];
+    let layout = check_ops(ops);
+    let rect = layout
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+
+    assert!(rect.loc.x > 0.);
+}
+
+#[test]
+fn edge_aware_struts_left_pins_single_column() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(false))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+    ];
+    let layout_without = check_ops(ops);
+    let rect_without = layout_without
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+    let width_without = layout_without
+        .windows()
+        .find(|(_, win)| win.0.id == 1)
+        .unwrap()
+        .1
+        .requested_size()
+        .unwrap()
+        .w;
+
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+    ];
+    let layout_with = check_ops(ops);
+    let rect_with = layout_with
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+    let width_with = layout_with
+        .windows()
+        .find(|(_, win)| win.0.id == 1)
+        .unwrap()
+        .1
+        .requested_size()
+        .unwrap()
+        .w;
+
+    assert!(rect_without.loc.x > 0.);
+    assert_eq!(rect_with.loc.x, 0.);
+    assert_eq!(width_with, width_without);
+}
+
+#[test]
+fn edge_aware_struts_left_pins_full_width_first_column() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(false))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::MaximizeColumn,
+        Op::CompleteAnimations,
+    ];
+    let layout_without = check_ops(ops);
+    let rect_without = layout_without
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::MaximizeColumn,
+        Op::CompleteAnimations,
+    ];
+    let layout_with = check_ops(ops);
+    let rect_with = layout_with
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+
+    assert!(rect_without.loc.x > 0.);
+    assert_eq!(rect_with.loc.x, 0.);
+}
+
+#[test]
+fn edge_aware_struts_left_pins_working_area_width_first_column() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(false))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::SetColumnWidth(SizeChange::SetFixed(1080)),
+        Op::Communicate(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::CompleteAnimations,
+    ];
+    let layout_without = check_ops(ops);
+    let rect_without = layout_without
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 1.,
+            layout_config: Some(Box::new(edge_aware_struts_layout_part(true))),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::SetColumnWidth(SizeChange::SetFixed(1080)),
+        Op::Communicate(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusColumnFirst,
+        Op::CompleteAnimations,
+    ];
+    let layout_with = check_ops(ops);
+    let rect_with = layout_with
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+
+    assert!(rect_without.loc.x > 0.);
+    assert_eq!(rect_with.loc.x, 0.);
+}
+
 #[test]
 fn move_column_to_workspace_unfocused_with_multiple_monitors() {
     let ops = [
@@ -3829,6 +4243,7 @@ prop_compose! {
         tab_indicator in prop::option::of(arbitrary_tab_indicator()),
         center_focused_column in prop::option::of(arbitrary_center_focused_column()),
         always_center_single_column in prop::option::of(any::<bool>().prop_map(Flag)),
+        edge_aware_struts in prop::option::of(any::<bool>().prop_map(Flag)),
         empty_workspace_above_first in prop::option::of(any::<bool>().prop_map(Flag)),
     ) -> niri_config::LayoutPart {
         niri_config::LayoutPart {
@@ -3836,6 +4251,7 @@ prop_compose! {
             struts,
             center_focused_column,
             always_center_single_column,
+            edge_aware_struts,
             empty_workspace_above_first,
             focus_ring,
             border,

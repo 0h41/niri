@@ -108,6 +108,12 @@ struct ColumnData {
     width: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EdgePinnedSide {
+    Left,
+    Right,
+}
+
 #[derive(Debug)]
 pub(super) enum ViewOffset {
     /// The view offset is static.
@@ -541,6 +547,127 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             || (self.options.layout.always_center_single_column && self.columns.len() <= 1)
     }
 
+    fn horizontal_strut_sizes(&self) -> (f64, f64) {
+        let left = self.working_area.loc.x - self.parent_area.loc.x;
+        let right = self.parent_area.loc.x + self.parent_area.size.w
+            - (self.working_area.loc.x + self.working_area.size.w);
+        (left, right)
+    }
+
+    fn edge_pinned_side_for_column(&self, idx: usize, mode: SizingMode) -> Option<EdgePinnedSide> {
+        if !self.options.layout.edge_aware_struts
+            || !mode.is_normal()
+            || self.is_centering_focused_column()
+            || self.columns.is_empty()
+        {
+            return None;
+        }
+
+        let (left_strut, right_strut) = self.horizontal_strut_sizes();
+        if idx == 0 && left_strut > 0. {
+            Some(EdgePinnedSide::Left)
+        } else if idx + 1 == self.columns.len() && right_strut > 0. {
+            Some(EdgePinnedSide::Right)
+        } else {
+            None
+        }
+    }
+
+    fn standard_snap_bounds_for_column(
+        &self,
+        idx: usize,
+        col_x: f64,
+        prev_col_w: Option<f64>,
+        next_col_w: Option<f64>,
+        center_on_overflow: bool,
+    ) -> (f64, f64) {
+        let col = &self.columns[idx];
+        let col_w = col.width();
+        let mode = col.sizing_mode();
+
+        let area = if mode.is_maximized() {
+            self.parent_area
+        } else {
+            self.working_area
+        };
+
+        let left_strut = area.loc.x;
+        let right_strut = self.view_size.w - area.size.w - area.loc.x;
+
+        // Normal columns align with the working area, but fullscreen columns align with the
+        // view size.
+        if mode.is_fullscreen() {
+            let left = col_x;
+            let right = left + col_w;
+            return (left, right);
+        }
+
+        // Logic from compute_new_view_offset.
+        let padding = if mode.is_maximized() {
+            0.
+        } else {
+            ((area.size.w - col_w) / 2.).clamp(0., self.options.layout.gaps)
+        };
+
+        let center = if area.size.w <= col_w {
+            col_x - left_strut
+        } else {
+            col_x - (area.size.w - col_w) / 2. - left_strut
+        };
+        let is_overflowing = |adj_col_w: Option<f64>| {
+            center_on_overflow
+                && adj_col_w
+                    .filter(|adj_col_w| {
+                        // NOTE: This logic won't work entirely correctly with small fixed-size
+                        // maximized windows (they have a different area and padding).
+                        center_on_overflow
+                            && adj_col_w + 3.0 * self.options.layout.gaps + col_w > area.size.w
+                    })
+                    .is_some()
+        };
+
+        let left = if is_overflowing(next_col_w) {
+            center
+        } else {
+            col_x - padding - left_strut
+        };
+        let right = if is_overflowing(prev_col_w) {
+            center + self.view_size.w
+        } else {
+            col_x + col_w + padding + right_strut
+        };
+        (left, right)
+    }
+
+    fn snap_bounds_for_column(
+        &self,
+        idx: usize,
+        col_x: f64,
+        prev_col_w: Option<f64>,
+        next_col_w: Option<f64>,
+        center_on_overflow: bool,
+    ) -> (f64, f64) {
+        let mut bounds = self.standard_snap_bounds_for_column(
+            idx,
+            col_x,
+            prev_col_w,
+            next_col_w,
+            center_on_overflow,
+        );
+
+        let col = &self.columns[idx];
+        match self.edge_pinned_side_for_column(idx, col.sizing_mode()) {
+            Some(EdgePinnedSide::Left) => bounds.0 = col_x - self.parent_area.loc.x,
+            Some(EdgePinnedSide::Right) => {
+                let parent_right = self.parent_area.loc.x + self.parent_area.size.w;
+                bounds.1 = col_x + col.width() + self.view_size.w - parent_right;
+            }
+            None => (),
+        }
+
+        bounds
+    }
+
     fn compute_new_view_offset_fit(
         &self,
         target_x: Option<f64>,
@@ -594,12 +721,40 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     fn compute_new_view_offset_for_column_fit(&self, target_x: Option<f64>, idx: usize) -> f64 {
         let col = &self.columns[idx];
-        self.compute_new_view_offset_fit(
-            target_x,
-            self.column_x(idx),
-            col.width(),
-            col.sizing_mode(),
-        )
+        let col_x = self.column_x(idx);
+        let mode = col.sizing_mode();
+        let area = if mode.is_maximized() {
+            self.parent_area
+        } else {
+            self.working_area
+        };
+
+        if mode.is_fullscreen() || area.size.w < col.width() {
+            return self.compute_new_view_offset_fit(target_x, col_x, col.width(), mode);
+        }
+
+        let normal_offset = self.compute_new_view_offset_fit(target_x, col_x, col.width(), mode);
+        let Some(side) = self.edge_pinned_side_for_column(idx, mode) else {
+            return normal_offset;
+        };
+
+        let normal_view_pos = col_x + normal_offset;
+        let (standard_left, standard_right) =
+            self.standard_snap_bounds_for_column(idx, col_x, None, None, false);
+        let standard_right = standard_right - self.view_size.w;
+
+        let pixel = 1. / self.scale;
+        match side {
+            EdgePinnedSide::Left if (normal_view_pos - standard_left).abs() < pixel => {
+                let (left, _) = self.snap_bounds_for_column(idx, col_x, None, None, false);
+                left - col_x
+            }
+            EdgePinnedSide::Right if (normal_view_pos - standard_right).abs() < pixel => {
+                let (_, right) = self.snap_bounds_for_column(idx, col_x, None, None, false);
+                right - self.view_size.w - col_x
+            }
+            _ => normal_offset,
+        }
     }
 
     fn compute_new_view_offset_for_column_centered(
@@ -2595,10 +2750,16 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return;
         }
 
-        let col = &mut self.columns[self.active_column_idx];
-        col.toggle_full_width();
+        let active_idx = self.active_column_idx;
+        {
+            let col = &mut self.columns[active_idx];
+            col.toggle_full_width();
+            cancel_resize_for_column(&mut self.interactive_resize, col);
+        }
 
-        cancel_resize_for_column(&mut self.interactive_resize, col);
+        if self.options.layout.edge_aware_struts {
+            self.animate_view_offset_to_column(None, active_idx, None);
+        }
     }
 
     pub fn set_window_width(&mut self, window: Option<&W::Id>, change: SizeChange) {
@@ -2877,6 +3038,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         // With place_within_column, the tab indicator changes the column size immediately.
         self.data[col_idx].update(col);
 
+        if self.options.layout.edge_aware_struts && col_idx == self.active_column_idx {
+            self.animate_view_offset_to_column(None, col_idx, None);
+        }
+
         true
     }
 
@@ -3084,47 +3249,48 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     pub fn dnd_scroll_gesture_scroll(&mut self, delta: f64) -> bool {
-        let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
-            return false;
-        };
-
-        let Some(last_time) = gesture.dnd_last_event_time else {
-            // Not a DnD scroll.
-            return false;
-        };
-
         let config = &self.options.gestures.dnd_edge_view_scroll;
-
         let now = self.clock.now_unadjusted();
-        gesture.dnd_last_event_time = Some(now);
+        let view_offset = {
+            let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
+                return false;
+            };
 
-        if delta == 0. {
-            // We're outside the scrolling zone.
-            gesture.dnd_nonzero_start_time = None;
-            return false;
-        }
+            let Some(last_time) = gesture.dnd_last_event_time else {
+                // Not a DnD scroll.
+                return false;
+            };
 
-        let nonzero_start = *gesture.dnd_nonzero_start_time.get_or_insert(now);
+            gesture.dnd_last_event_time = Some(now);
 
-        // Delay starting the gesture a bit to avoid unwanted movement when dragging across
-        // monitors.
-        let delay = Duration::from_millis(u64::from(config.delay_ms));
-        if now.saturating_sub(nonzero_start) < delay {
-            return true;
-        }
+            if delta == 0. {
+                // We're outside the scrolling zone.
+                gesture.dnd_nonzero_start_time = None;
+                return false;
+            }
 
-        let time_delta = now.saturating_sub(last_time).as_secs_f64();
+            let nonzero_start = *gesture.dnd_nonzero_start_time.get_or_insert(now);
 
-        let delta = delta * time_delta * config.max_speed;
+            // Delay starting the gesture a bit to avoid unwanted movement when dragging across
+            // monitors.
+            let delay = Duration::from_millis(u64::from(config.delay_ms));
+            if now.saturating_sub(nonzero_start) < delay {
+                return true;
+            }
 
-        gesture.tracker.push(delta, now);
+            let time_delta = now.saturating_sub(last_time).as_secs_f64();
 
-        let view_offset = gesture.tracker.pos() + gesture.delta_from_tracker;
+            let delta = delta * time_delta * config.max_speed;
+
+            gesture.tracker.push(delta, now);
+
+            gesture.tracker.pos() + gesture.delta_from_tracker
+        };
 
         // Clamp it so that it doesn't go too much out of bounds.
         let (leftmost, rightmost) = if self.columns.is_empty() {
             (0., 0.)
-        } else {
+        } else if self.is_centering_focused_column() {
             let gaps = self.options.layout.gaps;
 
             let mut leftmost = -self.working_area.size.w;
@@ -3147,11 +3313,52 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             rightmost -= active_col_x;
 
             (leftmost, rightmost)
+        } else {
+            let center_on_overflow = matches!(
+                self.options.layout.center_focused_column,
+                CenterFocusedColumn::OnOverflow
+            );
+            let gaps = self.options.layout.gaps;
+            let active_col_x = self.column_x(self.active_column_idx);
+
+            let leftmost =
+                self.snap_bounds_for_column(
+                    0,
+                    0.,
+                    None,
+                    self.columns.get(1).map(|c| c.width()),
+                    center_on_overflow,
+                )
+                .0 - active_col_x;
+
+            let last_col_idx = self.columns.len() - 1;
+            let last_col_x = self
+                .columns
+                .iter()
+                .take(last_col_idx)
+                .fold(0., |col_x, col| col_x + col.width() + gaps);
+            let rightmost =
+                self.snap_bounds_for_column(
+                    last_col_idx,
+                    last_col_x,
+                    last_col_idx
+                        .checked_sub(1)
+                        .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
+                    None,
+                    center_on_overflow,
+                )
+                .1 - self.view_size.w
+                    - active_col_x;
+
+            (leftmost, rightmost)
         };
         let min_offset = f64::min(leftmost, rightmost);
         let max_offset = f64::max(leftmost, rightmost);
         let clamped_offset = view_offset.clamp(min_offset, max_offset);
 
+        let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
+            unreachable!();
+        };
         gesture.delta_from_tracker += clamped_offset - view_offset;
         gesture.current_view_offset = clamped_offset;
         true
@@ -3238,66 +3445,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let view_width = self.view_size.w;
             let gaps = self.options.layout.gaps;
 
-            let snap_points =
-                |col_x, col: &Column<W>, prev_col_w: Option<f64>, next_col_w: Option<f64>| {
-                    let col_w = col.width();
-                    let mode = col.sizing_mode();
-
-                    let area = if mode.is_maximized() {
-                        self.parent_area
-                    } else {
-                        self.working_area
-                    };
-
-                    let left_strut = area.loc.x;
-                    let right_strut = self.view_size.w - area.size.w - area.loc.x;
-
-                    // Normal columns align with the working area, but fullscreen columns align with
-                    // the view size.
-                    if mode.is_fullscreen() {
-                        let left = col_x;
-                        let right = left + col_w;
-                        (left, right)
-                    } else {
-                        // Logic from compute_new_view_offset.
-                        let padding = if mode.is_maximized() {
-                            0.
-                        } else {
-                            ((area.size.w - col_w) / 2.).clamp(0., gaps)
-                        };
-
-                        let center = if area.size.w <= col_w {
-                            col_x - left_strut
-                        } else {
-                            col_x - (area.size.w - col_w) / 2. - left_strut
-                        };
-                        let is_overflowing = |adj_col_w: Option<f64>| {
-                            center_on_overflow
-                                && adj_col_w
-                                    .filter(|adj_col_w| {
-                                        // NOTE: This logic won't work entirely correctly with small
-                                        // fixed-size maximized windows (they have a different area
-                                        // and padding).
-                                        center_on_overflow
-                                            && adj_col_w + 3.0 * gaps + col_w > area.size.w
-                                    })
-                                    .is_some()
-                        };
-
-                        let left = if is_overflowing(next_col_w) {
-                            center
-                        } else {
-                            col_x - padding - left_strut
-                        };
-                        let right = if is_overflowing(prev_col_w) {
-                            center + view_width
-                        } else {
-                            col_x + col_w + padding + right_strut
-                        };
-                        (left, right)
-                    }
-                };
-
             // Prevent the gesture from snapping further than the first/last column, as this is
             // generally undesired.
             //
@@ -3311,28 +3458,32 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             //
             // This isn't actually a big problem because it's very much an obscure edge case. Just
             // need to make sure the code doesn't panic when that happens.
-            let leftmost_snap = snap_points(
-                0.,
-                &self.columns[0],
-                None,
-                self.columns.get(1).map(|c| c.width()),
-            )
-            .0;
+            let leftmost_snap = self
+                .snap_bounds_for_column(
+                    0,
+                    0.,
+                    None,
+                    self.columns.get(1).map(|c| c.width()),
+                    center_on_overflow,
+                )
+                .0;
             let last_col_idx = self.columns.len() - 1;
             let last_col_x = self
                 .columns
                 .iter()
                 .take(last_col_idx)
                 .fold(0., |col_x, col| col_x + col.width() + gaps);
-            let rightmost_snap = snap_points(
-                last_col_x,
-                &self.columns[last_col_idx],
-                last_col_idx
-                    .checked_sub(1)
-                    .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
-                None,
-            )
-            .1 - view_width;
+            let rightmost_snap =
+                self.snap_bounds_for_column(
+                    last_col_idx,
+                    last_col_x,
+                    last_col_idx
+                        .checked_sub(1)
+                        .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
+                    None,
+                    center_on_overflow,
+                )
+                .1 - view_width;
 
             snapping_points.push(Snap {
                 view_pos: leftmost_snap,
@@ -3351,28 +3502,32 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     });
                 }
 
-                let right = right - view_width;
-                if leftmost_snap < right && right < rightmost_snap {
+                let right_view_pos: f64 = right - view_width;
+                if (right_view_pos - left).abs() > f64::EPSILON
+                    && leftmost_snap < right_view_pos
+                    && right_view_pos < rightmost_snap
+                {
                     snapping_points.push(Snap {
-                        view_pos: right,
+                        view_pos: right_view_pos,
                         col_idx,
                     });
                 }
             };
 
             let mut col_x = 0.;
-            for (col_idx, col) in self.columns.iter().enumerate() {
-                let (left, right) = snap_points(
+            for (col_idx, _) in self.columns.iter().enumerate() {
+                let (left, right) = self.snap_bounds_for_column(
+                    col_idx,
                     col_x,
-                    col,
                     col_idx
                         .checked_sub(1)
                         .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
                     self.columns.get(col_idx + 1).map(|c| c.width()),
+                    center_on_overflow,
                 );
                 push(col_idx, left, right);
 
-                col_x += col.width() + gaps;
+                col_x += self.columns[col_idx].width() + gaps;
             }
         }
 
@@ -3389,70 +3544,45 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let mut new_col_idx = target_snap.col_idx;
 
         if !self.is_centering_focused_column() {
+            let center_on_overflow = matches!(
+                self.options.layout.center_focused_column,
+                CenterFocusedColumn::OnOverflow
+            );
             // Focus the furthest window towards the direction of the gesture.
             if target_view_offset >= current_view_offset {
                 for col_idx in (new_col_idx + 1)..self.columns.len() {
-                    let col = &self.columns[col_idx];
                     let col_x = self.column_x(col_idx);
-                    let col_w = col.width();
-                    let mode = col.sizing_mode();
+                    let (_, right) = self.snap_bounds_for_column(
+                        col_idx,
+                        col_x,
+                        col_idx
+                            .checked_sub(1)
+                            .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
+                        self.columns.get(col_idx + 1).map(|c| c.width()),
+                        center_on_overflow,
+                    );
 
-                    let area = if mode.is_maximized() {
-                        self.parent_area
-                    } else {
-                        self.working_area
-                    };
-
-                    let left_strut = area.loc.x;
-
-                    if mode.is_fullscreen() {
-                        if target_snap.view_pos + self.view_size.w < col_x + col_w {
-                            break;
-                        }
-                    } else {
-                        let padding = if mode.is_maximized() {
-                            0.
-                        } else {
-                            ((area.size.w - col_w) / 2.).clamp(0., self.options.layout.gaps)
-                        };
-
-                        if target_snap.view_pos + left_strut + area.size.w < col_x + col_w + padding
-                        {
-                            break;
-                        }
+                    if target_snap.view_pos + self.view_size.w < right {
+                        break;
                     }
 
                     new_col_idx = col_idx;
                 }
             } else {
                 for col_idx in (0..new_col_idx).rev() {
-                    let col = &self.columns[col_idx];
                     let col_x = self.column_x(col_idx);
-                    let col_w = col.width();
-                    let mode = col.sizing_mode();
+                    let (left, _) = self.snap_bounds_for_column(
+                        col_idx,
+                        col_x,
+                        col_idx
+                            .checked_sub(1)
+                            .and_then(|idx| self.columns.get(idx).map(|c| c.width())),
+                        self.columns.get(col_idx + 1).map(|c| c.width()),
+                        center_on_overflow,
+                    );
 
-                    let area = if mode.is_maximized() {
-                        self.parent_area
-                    } else {
-                        self.working_area
-                    };
-
-                    let left_strut = area.loc.x;
-
-                    if mode.is_fullscreen() {
-                        if col_x < target_snap.view_pos {
-                            break;
-                        }
-                    } else {
-                        let padding = if mode.is_maximized() {
-                            0.
-                        } else {
-                            ((area.size.w - col_w) / 2.).clamp(0., self.options.layout.gaps)
-                        };
-
-                        if col_x - padding < target_snap.view_pos + left_strut {
-                            break;
-                        }
+                    if left < target_snap.view_pos {
+                        break;
                     }
 
                     new_col_idx = col_idx;
