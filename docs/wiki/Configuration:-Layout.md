@@ -500,6 +500,31 @@ layout {
 }
 ```
 
+### `edge-aware-struts`
+
+<sup>Since: next release</sup>
+
+Normally, left and right [struts](#struts) make the adjacent ribbon column always peek out slightly,
+including when the focused column is the first or last one in the ribbon.
+
+When `edge-aware-struts` is enabled, focusing the first column can temporarily ignore the left
+strut for placement, and focusing the last column can temporarily ignore the right strut for
+placement. This does not change the column width.
+
+This is most useful on horizontally oriented outputs with left and right struts configured, and is
+especially convenient when configured per-output through [layout config overrides in outputs](./Configuration:-Outputs.md#layout-config-overrides).
+
+```kdl
+layout {
+    edge-aware-struts
+
+    struts {
+        left 64
+        right 64
+    }
+}
+```
+
 ### `struts`
 
 Struts shrink the area occupied by windows, similarly to layer-shell panels.
