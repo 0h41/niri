@@ -554,6 +554,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         (left, right)
     }
 
+    fn edge_pinned_inset_for_column(&self, idx: usize) -> f64 {
+        let col = &self.columns[idx];
+        let tile = &col.tiles[col.active_tile_idx];
+        let focus_ring = tile.focus_ring();
+
+        if focus_ring.is_off() {
+            0.
+        } else {
+            focus_ring.width()
+        }
+    }
+
     fn edge_pinned_side_for_column(&self, idx: usize, mode: SizingMode) -> Option<EdgePinnedSide> {
         if !self.options.layout.edge_aware_struts
             || !mode.is_normal()
@@ -656,11 +668,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         );
 
         let col = &self.columns[idx];
+        let inset = self.edge_pinned_inset_for_column(idx);
         match self.edge_pinned_side_for_column(idx, col.sizing_mode()) {
-            Some(EdgePinnedSide::Left) => bounds.0 = col_x - self.parent_area.loc.x,
+            Some(EdgePinnedSide::Left) => bounds.0 = col_x - self.parent_area.loc.x - inset,
             Some(EdgePinnedSide::Right) => {
                 let parent_right = self.parent_area.loc.x + self.parent_area.size.w;
-                bounds.1 = col_x + col.width() + self.view_size.w - parent_right;
+                bounds.1 = col_x + col.width() + self.view_size.w - parent_right + inset;
             }
             None => (),
         }

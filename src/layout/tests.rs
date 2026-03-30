@@ -3428,6 +3428,20 @@ fn edge_aware_struts_small_columns_layout_part(enabled: bool) -> niri_config::La
     }
 }
 
+fn edge_aware_struts_fractional_focus_ring_layout_part() -> niri_config::LayoutPart {
+    niri_config::LayoutPart {
+        focus_ring: Some(niri_config::BorderRule {
+            width: Some(FloatOrInt(0.5)),
+            ..Default::default()
+        }),
+        ..edge_aware_struts_layout_part(true)
+    }
+}
+
+fn edge_aware_struts_focus_ring_width() -> f64 {
+    niri_config::Layout::default().focus_ring.width
+}
+
 #[test]
 fn edge_aware_struts_output_override_left_pins_first_column_without_resizing() {
     let ops = [
@@ -3491,7 +3505,7 @@ fn edge_aware_struts_output_override_left_pins_first_column_without_resizing() {
         .w;
 
     assert!(rect_without.loc.x > 0.);
-    assert_eq!(rect_with.loc.x, 0.);
+    assert_eq!(rect_with.loc.x, edge_aware_struts_focus_ring_width());
     assert_eq!(width_with, width_without);
 }
 
@@ -3566,7 +3580,10 @@ fn edge_aware_struts_output_override_right_pins_last_column_without_resizing() {
         .w;
 
     assert!(rect_without.loc.x + rect_without.size.w < 1280.);
-    assert_eq!(rect_with.loc.x + rect_with.size.w, 1280.);
+    assert_eq!(
+        rect_with.loc.x + rect_with.size.w,
+        1280. - edge_aware_struts_focus_ring_width()
+    );
     assert_eq!(width_with, width_without);
 }
 
@@ -3710,8 +3727,30 @@ fn edge_aware_struts_left_pins_single_column() {
         .w;
 
     assert!(rect_without.loc.x > 0.);
-    assert_eq!(rect_with.loc.x, 0.);
+    assert_eq!(rect_with.loc.x, edge_aware_struts_focus_ring_width());
     assert_eq!(width_with, width_without);
+}
+
+#[test]
+fn edge_aware_struts_uses_fractional_focus_ring_width() {
+    let ops = [
+        Op::AddScaledOutput {
+            id: 1,
+            scale: 2.,
+            layout_config: Some(Box::new(edge_aware_struts_fractional_focus_ring_layout_part())),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+    ];
+    let layout = check_ops(ops);
+    let rect = layout
+        .active_monitor_ref()
+        .unwrap()
+        .active_tile_visual_rectangle()
+        .unwrap();
+
+    assert_eq!(rect.loc.x, 0.5);
 }
 
 #[test]
@@ -3763,7 +3802,7 @@ fn edge_aware_struts_left_pins_full_width_first_column() {
         .unwrap();
 
     assert!(rect_without.loc.x > 0.);
-    assert_eq!(rect_with.loc.x, 0.);
+    assert_eq!(rect_with.loc.x, edge_aware_struts_focus_ring_width());
 }
 
 #[test]
@@ -3817,7 +3856,7 @@ fn edge_aware_struts_left_pins_working_area_width_first_column() {
         .unwrap();
 
     assert!(rect_without.loc.x > 0.);
-    assert_eq!(rect_with.loc.x, 0.);
+    assert_eq!(rect_with.loc.x, edge_aware_struts_focus_ring_width());
 }
 
 #[test]
