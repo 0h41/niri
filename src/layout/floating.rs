@@ -386,6 +386,24 @@ impl<W: LayoutElement> FloatingSpace<W> {
             .map(Tile::window)
     }
 
+    pub fn active_window_with_ipc_layout(&self) -> Option<(&W, WindowLayout)> {
+        let id = self.active_window_id.as_ref()?;
+        let idx = self.idx_of(id)?;
+        let tile = &self.tiles[idx];
+
+        let pos = self.data[idx]
+            .logical_pos
+            .to_physical_precise_round(self.scale)
+            .to_logical(self.scale);
+
+        let layout = WindowLayout {
+            tile_pos_in_workspace_view: Some(pos.into()),
+            ..tile.ipc_layout_template()
+        };
+
+        Some((tile.window(), layout))
+    }
+
     pub fn active_window_mut(&mut self) -> Option<&mut W> {
         let id = self.active_window_id.as_ref()?;
         self.tiles

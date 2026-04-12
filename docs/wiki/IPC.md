@@ -45,6 +45,10 @@ $ socat STDIO "$NIRI_SOCKET"
 {"Ok":{"FocusedWindow":{"id":12,"title":"t socat STDIO /run/u ~","app_id":"Alacritty","workspace_id":6,"is_focused":true}}}
 ```
 
+For `FocusedWindow`, the `layout.tile_visual_geometry_in_layout` field may be present. It reports
+the visible tile rectangle in the compositor's global logical coordinate space, which is suitable
+for passing to tools like `grim -g` after formatting it as `x,y widthxheight`.
+
 The reply is an `Ok` or an `Err` wrapping the same JSON object as you get from `niri msg --json`.
 
 For more complex requests, you can use `socat` to find how `niri msg` formats them:

@@ -435,6 +435,21 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         Some(col.tiles[col.active_tile_idx].window())
     }
 
+    pub fn active_window_with_ipc_layout(&self) -> Option<(&W, WindowLayout)> {
+        if self.columns.is_empty() {
+            return None;
+        }
+
+        let col = &self.columns[self.active_column_idx];
+        let tile = &col.tiles[col.active_tile_idx];
+        let layout = WindowLayout {
+            pos_in_scrolling_layout: Some((self.active_column_idx + 1, col.active_tile_idx + 1)),
+            ..tile.ipc_layout_template()
+        };
+
+        Some((tile.window(), layout))
+    }
+
     pub fn active_window_mut(&mut self) -> Option<&mut W> {
         if self.columns.is_empty() {
             return None;

@@ -17,8 +17,8 @@ use futures_util::{select_biased, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, Fu
 use niri_config::OutputName;
 use niri_ipc::state::{EventStreamState, EventStreamStatePart as _};
 use niri_ipc::{
-    Action, Event, KeyboardLayouts, OutputConfigChanged, Overview, Reply, Request, Response,
-    Timestamp, WindowLayout, Workspace,
+    Action, Event, KeyboardLayouts, LogicalRect, OutputConfigChanged, Overview, Reply, Request,
+    Response, Timestamp, WindowLayout, Workspace,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{
@@ -335,9 +335,16 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             Response::KeyboardLayouts(layout)
         }
         Request::FocusedWindow => {
-            let state = ctx.event_stream_state.borrow();
-            let windows = &state.windows.windows;
-            let window = windows.values().find(|win| win.is_focused).cloned();
+            let (tx, rx) = async_channel::bounded(1);
+            ctx.event_loop.insert_idle(move |state| {
+                let window = focused_window(state);
+                let _ = tx.send_blocking(window);
+            });
+
+            let window = rx
+                .recv()
+                .await
+                .map_err(|err| format!("error getting focused window: {err}"))?;
             Response::FocusedWindow(window)
         }
         Request::PickWindow => {
@@ -529,6 +536,27 @@ fn make_ipc_window(
         layout,
         focus_timestamp: mapped.get_focus_timestamp().map(Timestamp::from),
     })
+}
+
+fn focused_window(state: &mut State) -> Option<niri_ipc::Window> {
+    let (mapped, output, workspace_id, mut layout, tile_visual_rect) =
+        state.niri.layout.focus_with_output_and_ipc_layout()?;
+    if !mapped.is_focused() {
+        return None;
+    }
+
+    if let Some(mut rect) = tile_visual_rect {
+        let output_geo = state.niri.global_space.output_geometry(output).unwrap();
+        rect.loc += output_geo.loc.to_f64();
+        layout.tile_visual_geometry_in_layout = Some(LogicalRect {
+            x: rect.loc.x,
+            y: rect.loc.y,
+            width: rect.size.w,
+            height: rect.size.h,
+        });
+    }
+
+    Some(make_ipc_window(mapped, workspace_id, layout))
 }
 
 impl State {

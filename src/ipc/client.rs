@@ -708,6 +708,7 @@ fn print_window(window: &Window) {
         tile_size,
         window_size,
         tile_pos_in_workspace_view,
+        tile_visual_geometry_in_layout,
         window_offset_in_tile,
     } = window.layout;
 
@@ -727,6 +728,16 @@ fn print_window(window: &Window) {
             "    Workspace-view position: {}, {}",
             fmt_rounded(pos.0),
             fmt_rounded(pos.1)
+        );
+    }
+
+    if let Some(rect) = tile_visual_geometry_in_layout {
+        println!(
+            "    Geometry in layout: {}, {} {} x {}",
+            fmt_rounded(rect.x),
+            fmt_rounded(rect.y),
+            fmt_rounded(rect.width),
+            fmt_rounded(rect.height)
         );
     }
 

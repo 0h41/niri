@@ -1346,6 +1346,20 @@ pub struct Timestamp {
     pub nanos: u32,
 }
 
+/// Rectangle in the compositor's logical coordinate space.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct LogicalRect {
+    /// Logical X position.
+    pub x: f64,
+    /// Logical Y position.
+    pub y: f64,
+    /// Width in logical pixels.
+    pub width: f64,
+    /// Height in logical pixels.
+    pub height: f64,
+}
+
 /// Position- and size-related properties of a [`Window`].
 ///
 /// Optional properties will be unset for some windows, do not rely on them being present. Whether
@@ -1357,11 +1371,11 @@ pub struct Timestamp {
 /// logical pixels wide.
 ///
 /// This struct contains positions and sizes both for full tiles ([`Self::tile_size`],
-/// [`Self::tile_pos_in_workspace_view`]) and the window geometry ([`Self::window_size`],
-/// [`Self::window_offset_in_tile`]). For visual displays, use the tile properties, as they
-/// correspond to what the user visually considers "window". The window properties on the other
-/// hand are mainly useful when you need to know the underlying Wayland window sizes, e.g. for
-/// application debugging.
+/// [`Self::tile_pos_in_workspace_view`], [`Self::tile_visual_geometry_in_layout`]) and the window
+/// geometry ([`Self::window_size`], [`Self::window_offset_in_tile`]). For visual displays, use the
+/// tile properties, as they correspond to what the user visually considers "window". The window
+/// properties on the other hand are mainly useful when you need to know the underlying Wayland
+/// window sizes, e.g. for application debugging.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct WindowLayout {
@@ -1384,6 +1398,14 @@ pub struct WindowLayout {
     ///
     /// This is the same "workspace view" as in gradients' `relative-to` in the niri config.
     pub tile_pos_in_workspace_view: Option<(f64, f64)>,
+    /// Visible tile geometry in the compositor layout.
+    ///
+    /// This rectangle is in the same global coordinate space as [`LogicalOutput`], and is
+    /// currently only guaranteed to be present for focused-window queries.
+    ///
+    /// This geometry is clipped to the visible layout area, so it can be used directly with tools
+    /// like `grim -g`.
+    pub tile_visual_geometry_in_layout: Option<LogicalRect>,
     /// Location of the window's visual geometry within its tile.
     ///
     /// This includes things like border sizes. For fullscreened fixed-size windows this includes

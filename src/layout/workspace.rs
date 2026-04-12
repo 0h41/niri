@@ -475,6 +475,14 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    pub fn active_window_with_ipc_layout(&self) -> Option<(&W, WindowLayout)> {
+        if self.floating_is_active.get() {
+            self.floating.active_window_with_ipc_layout()
+        } else {
+            self.scrolling.active_window_with_ipc_layout()
+        }
+    }
+
     pub fn active_window_mut(&mut self) -> Option<&mut W> {
         if self.floating_is_active.get() {
             self.floating.active_window_mut()

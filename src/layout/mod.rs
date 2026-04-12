@@ -2251,6 +2251,38 @@ impl<W: LayoutElement> Layout<W> {
         mon.active_window().map(|win| (win, &mon.output))
     }
 
+    pub fn focus_with_output_and_ipc_layout(
+        &self,
+    ) -> Option<(
+        &W,
+        &Output,
+        Option<WorkspaceId>,
+        WindowLayout,
+        Option<Rectangle<f64, Logical>>,
+    )> {
+        if let Some(InteractiveMoveState::Moving(move_)) = &self.interactive_move {
+            let layout = move_.tile.ipc_layout_template();
+            let rect = Rectangle::new(move_.tile_render_location(1.), move_.tile.tile_size());
+            return Some((move_.tile.window(), &move_.output, None, layout, Some(rect)));
+        }
+
+        let MonitorSet::Normal {
+            monitors,
+            active_monitor_idx,
+            ..
+        } = &self.monitor_set
+        else {
+            return None;
+        };
+
+        let mon = &monitors[*active_monitor_idx];
+        let ws = mon.active_workspace_ref();
+        let (win, layout) = ws.active_window_with_ipc_layout()?;
+        let rect = mon.active_tile_visual_rectangle();
+
+        Some((win, &mon.output, Some(ws.id()), layout, rect))
+    }
+
     pub fn interactive_moved_window_under(
         &self,
         output: &Output,
