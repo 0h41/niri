@@ -316,6 +316,21 @@ pub fn write_png_rgba8(
     writer.write_image_data(pixels)
 }
 
+pub fn write_png_rgba8_fast(
+    w: impl Write,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+) -> Result<(), png::EncodingError> {
+    let mut encoder = png::Encoder::new(w, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(png::Compression::Fastest);
+
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(pixels)
+}
+
 pub fn output_matches_name(output: &Output, target: &str) -> bool {
     let name = output.user_data().get::<OutputName>().unwrap();
     name.matches(target)

@@ -34,7 +34,7 @@ use crate::backend::IpcOutputMap;
 use crate::input::pick_window_grab::PickWindowGrab;
 use crate::layout::workspace::WorkspaceId;
 use crate::niri::State;
-use crate::utils::{version, with_toplevel_role, write_png_rgba8};
+use crate::utils::{version, with_toplevel_role, write_png_rgba8_fast};
 use crate::window::Mapped;
 
 // If an event stream client fails to read events fast enough that we accumulate more than this
@@ -634,7 +634,7 @@ fn screenshot_window_inner(
 
             let mut png = Vec::new();
             let writer = std::io::Cursor::new(&mut png);
-            write_png_rgba8(writer, size.w as u32, size.h as u32, &pixels)
+            write_png_rgba8_fast(writer, size.w as u32, size.h as u32, &pixels)
                 .map_err(|err| format!("error encoding screenshot PNG: {err}"))?;
 
             Ok(png)
