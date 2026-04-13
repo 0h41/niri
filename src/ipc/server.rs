@@ -9,7 +9,6 @@ use std::{env, io, process};
 
 use anyhow::Context;
 use async_channel::{Receiver, Sender, TrySendError};
-use base64::Engine as _;
 use calloop::futures::Scheduler;
 use calloop::io::Async;
 use directories::BaseDirs;
@@ -19,7 +18,7 @@ use niri_config::OutputName;
 use niri_ipc::state::{EventStreamState, EventStreamStatePart as _};
 use niri_ipc::{
     Action, Event, KeyboardLayouts, LogicalRect, OutputConfigChanged, Overview, Reply, Request,
-    Response, Screenshot, Timestamp, WindowLayout, Workspace,
+    Response, Timestamp, WindowLayout, Workspace,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{
@@ -206,6 +205,25 @@ async fn handle_client(ctx: ClientCtx, stream: Async<'static, UnixStream>) -> an
         let request = serde_json::from_slice(&buf)
             .context("error parsing request")
             .map_err(|err| err.to_string());
+        if let Ok(Request::ScreenshotWindow { id, show_pointer }) = request.clone() {
+            let reply = screenshot_window(&ctx, id, show_pointer).await;
+            match reply {
+                Ok(png) => {
+                    write.write_all(&png).await.context("error writing reply")?;
+                }
+                Err(err) => {
+                    warn!("error processing IPC request: {err:?}");
+
+                    buf.clear();
+                    let reply: Reply = Err(err);
+                    serde_json::to_writer(&mut buf, &reply).context("error formatting reply")?;
+                    buf.push(b'\n');
+                    write.write_all(&buf).await.context("error writing reply")?;
+                }
+            }
+
+            return Ok(());
+        }
         let requested_error = matches!(request, Ok(Request::ReturnError));
         let requested_event_stream = matches!(request, Ok(Request::EventStream));
 
@@ -272,6 +290,11 @@ async fn handle_client(ctx: ClientCtx, stream: Async<'static, UnixStream>) -> an
 async fn process(ctx: &ClientCtx, request: Request) -> Reply {
     let response = match request {
         Request::ReturnError => return Err(String::from("example compositor error")),
+        Request::ScreenshotWindow { .. } => {
+            return Err(String::from(
+                "ScreenshotWindow is handled as a binary reply before JSON response processing",
+            ));
+        }
         Request::Version => Response::Version(version()),
         Request::Outputs => {
             let ipc_outputs = ctx.ipc_outputs.lock().unwrap().clone();
@@ -347,19 +370,6 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                 .await
                 .map_err(|err| format!("error getting focused window: {err}"))?;
             Response::FocusedWindow(window)
-        }
-        Request::ScreenshotWindow { id, show_pointer } => {
-            let (tx, rx) = async_channel::bounded(1);
-            ctx.event_loop.insert_idle(move |state| {
-                let screenshot = screenshot_window(state, id, show_pointer);
-                let _ = tx.send_blocking(screenshot);
-            });
-
-            let screenshot = rx
-                .recv()
-                .await
-                .map_err(|err| format!("error getting screenshot: {err}"))??;
-            Response::Screenshot(screenshot)
         }
         Request::PickWindow => {
             let (tx, rx) = async_channel::bounded(1);
@@ -573,11 +583,27 @@ fn focused_window(state: &mut State) -> Option<niri_ipc::Window> {
     Some(make_ipc_window(mapped, workspace_id, layout))
 }
 
-fn screenshot_window(
+async fn screenshot_window(
+    ctx: &ClientCtx,
+    id: Option<u64>,
+    show_pointer: bool,
+) -> Result<Vec<u8>, String> {
+    let (tx, rx) = async_channel::bounded(1);
+    ctx.event_loop.insert_idle(move |state| {
+        let png = screenshot_window_inner(state, id, show_pointer);
+        let _ = tx.send_blocking(png);
+    });
+
+    rx.recv()
+        .await
+        .map_err(|err| format!("error getting screenshot: {err}"))?
+}
+
+fn screenshot_window_inner(
     state: &mut State,
     id: Option<u64>,
     show_pointer: bool,
-) -> Result<Screenshot, String> {
+) -> Result<Vec<u8>, String> {
     let (output, mapped) = match id {
         Some(id) => {
             let mut windows = state.niri.layout.windows();
@@ -611,9 +637,7 @@ fn screenshot_window(
             write_png_rgba8(writer, size.w as u32, size.h as u32, &pixels)
                 .map_err(|err| format!("error encoding screenshot PNG: {err}"))?;
 
-            Ok(Screenshot {
-                png_base64: base64::engine::general_purpose::STANDARD.encode(png),
-            })
+            Ok(png)
         })
         .ok_or_else(|| String::from("no renderer available for screenshot"))?
 }

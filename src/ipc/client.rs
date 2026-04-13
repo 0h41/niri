@@ -1,16 +1,18 @@
+use std::io::BufRead;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::iter::Peekable;
+use std::net::Shutdown;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::{env, slice};
 
 use anyhow::{anyhow, bail, Context};
-use base64::Engine as _;
 use niri_config::OutputName;
-use niri_ipc::socket::Socket;
+use niri_ipc::socket::{Socket, SOCKET_PATH_ENV};
 use niri_ipc::{
     Action, Cast, CastKind, CastTarget, Event, KeyboardLayouts, LogicalOutput, Mode, Output,
-    OutputConfigChanged, Overview, Request, Response, Transform, Window, WindowLayout,
+    OutputConfigChanged, Overview, Reply, Request, Response, Transform, Window, WindowLayout,
 };
 use serde_json::json;
 
@@ -18,6 +20,19 @@ use crate::cli::Msg;
 use crate::utils::version;
 
 pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
+    if let Msg::ScreenshotWindow { id, show_pointer } = msg {
+        if json {
+            bail!("--json is not supported for screenshot-window");
+        }
+
+        // Default SIGPIPE so that our prints don't panic on stdout closing.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+
+        return handle_screenshot_window(id, show_pointer);
+    }
+
     // For actions taking paths, prepend the niri CLI's working directory.
     if let Msg::Action {
         action:
@@ -35,10 +50,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::Version => Request::Version,
         Msg::Outputs => Request::Outputs,
         Msg::FocusedWindow => Request::FocusedWindow,
-        Msg::ScreenshotWindow { id, show_pointer } => Request::ScreenshotWindow {
-            id: *id,
-            show_pointer: *show_pointer,
-        },
+        Msg::ScreenshotWindow { .. } => unreachable!("handled before request dispatch"),
         Msg::FocusedOutput => Request::FocusedOutput,
         Msg::PickWindow => Request::PickWindow,
         Msg::PickColor => Request::PickColor,
@@ -120,6 +132,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::RequestError => {
             bail!("unexpected response: expected an error, got {response:?}");
         }
+        Msg::ScreenshotWindow { .. } => unreachable!("handled before response dispatch"),
         Msg::Version => {
             let Response::Version(compositor_version) = response else {
                 bail!("unexpected response: expected Version, got {response:?}");
@@ -186,26 +199,6 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
             } else {
                 println!("No window is focused.");
             }
-        }
-        Msg::ScreenshotWindow { .. } => {
-            let Response::Screenshot(screenshot) = response else {
-                bail!("unexpected response: expected Screenshot, got {response:?}");
-            };
-
-            if json {
-                let screenshot =
-                    serde_json::to_string(&screenshot).context("error formatting response")?;
-                println!("{screenshot}");
-                return Ok(());
-            }
-
-            let png = base64::engine::general_purpose::STANDARD
-                .decode(screenshot.png_base64)
-                .context("error decoding screenshot PNG")?;
-            std::io::stdout()
-                .write_all(&png)
-                .context("error writing screenshot PNG to stdout")?;
-            return Ok(());
         }
         Msg::Windows => {
             let Response::Windows(mut windows) = response else {
@@ -578,6 +571,52 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn handle_screenshot_window(id: Option<u64>, show_pointer: bool) -> anyhow::Result<()> {
+    let socket_path = env::var_os(SOCKET_PATH_ENV).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{SOCKET_PATH_ENV} is not set, are you running this within niri?"),
+        )
+    })?;
+    let mut stream =
+        UnixStream::connect(&socket_path).context("error connecting to the niri socket")?;
+
+    let mut buf = serde_json::to_string(&Request::ScreenshotWindow { id, show_pointer })
+        .context("error formatting screenshot request")?;
+    buf.push('\n');
+    stream
+        .write_all(buf.as_bytes())
+        .context("error sending screenshot request")?;
+    stream
+        .shutdown(Shutdown::Write)
+        .context("error shutting down screenshot request write side")?;
+
+    let mut stream = std::io::BufReader::new(stream);
+    let first = stream
+        .fill_buf()
+        .context("error reading screenshot response")?;
+    if first.is_empty() {
+        bail!("niri closed the connection without replying to screenshot-window");
+    }
+
+    if first[0] == b'{' {
+        let mut line = String::new();
+        stream
+            .read_line(&mut line)
+            .context("error reading screenshot error response")?;
+        let reply: Reply =
+            serde_json::from_str(&line).context("error parsing screenshot error response")?;
+        match reply {
+            Err(err) => return Err(anyhow!(err).context("niri returned an error")),
+            Ok(response) => bail!("unexpected screenshot response: {response:?}"),
+        }
+    }
+
+    std::io::copy(&mut stream, &mut std::io::stdout())
+        .context("error writing screenshot PNG to stdout")?;
     Ok(())
 }
 

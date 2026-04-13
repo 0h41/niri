@@ -3737,7 +3737,9 @@ fn edge_aware_struts_uses_fractional_focus_ring_width() {
         Op::AddScaledOutput {
             id: 1,
             scale: 2.,
-            layout_config: Some(Box::new(edge_aware_struts_fractional_focus_ring_layout_part())),
+            layout_config: Some(Box::new(
+                edge_aware_struts_fractional_focus_ring_layout_part(),
+            )),
         },
         Op::AddWindow {
             params: TestWindowParams::new(1),

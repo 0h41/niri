@@ -50,7 +50,6 @@ the visible tile rectangle in the compositor's global logical coordinate space, 
 for passing to tools like `grim -g` after formatting it as `x,y widthxheight`.
 
 `niri msg screenshot-window` captures a PNG of a window and writes the raw PNG bytes to stdout.
-With `--json`, it instead returns a JSON object containing a `png_base64` field.
 
 The reply is an `Ok` or an `Err` wrapping the same JSON object as you get from `niri msg --json`.
 
