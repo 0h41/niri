@@ -9,6 +9,7 @@ use std::{env, io, process};
 
 use anyhow::Context;
 use async_channel::{Receiver, Sender, TrySendError};
+use base64::Engine as _;
 use calloop::futures::Scheduler;
 use calloop::io::Async;
 use directories::BaseDirs;
@@ -18,7 +19,7 @@ use niri_config::OutputName;
 use niri_ipc::state::{EventStreamState, EventStreamStatePart as _};
 use niri_ipc::{
     Action, Event, KeyboardLayouts, LogicalRect, OutputConfigChanged, Overview, Reply, Request,
-    Response, Timestamp, WindowLayout, Workspace,
+    Response, Screenshot, Timestamp, WindowLayout, Workspace,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{
@@ -34,7 +35,7 @@ use crate::backend::IpcOutputMap;
 use crate::input::pick_window_grab::PickWindowGrab;
 use crate::layout::workspace::WorkspaceId;
 use crate::niri::State;
-use crate::utils::{version, with_toplevel_role};
+use crate::utils::{version, with_toplevel_role, write_png_rgba8};
 use crate::window::Mapped;
 
 // If an event stream client fails to read events fast enough that we accumulate more than this
@@ -347,6 +348,19 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                 .map_err(|err| format!("error getting focused window: {err}"))?;
             Response::FocusedWindow(window)
         }
+        Request::ScreenshotWindow { id, show_pointer } => {
+            let (tx, rx) = async_channel::bounded(1);
+            ctx.event_loop.insert_idle(move |state| {
+                let screenshot = screenshot_window(state, id, show_pointer);
+                let _ = tx.send_blocking(screenshot);
+            });
+
+            let screenshot = rx
+                .recv()
+                .await
+                .map_err(|err| format!("error getting screenshot: {err}"))??;
+            Response::Screenshot(screenshot)
+        }
         Request::PickWindow => {
             let (tx, rx) = async_channel::bounded(1);
             ctx.event_loop.insert_idle(move |state| {
@@ -557,6 +571,51 @@ fn focused_window(state: &mut State) -> Option<niri_ipc::Window> {
     }
 
     Some(make_ipc_window(mapped, workspace_id, layout))
+}
+
+fn screenshot_window(
+    state: &mut State,
+    id: Option<u64>,
+    show_pointer: bool,
+) -> Result<Screenshot, String> {
+    let (output, mapped) = match id {
+        Some(id) => {
+            let mut windows = state.niri.layout.windows();
+            let window = windows.find(|(_, mapped)| mapped.id().get() == id);
+            let Some((Some(monitor), mapped)) = window else {
+                return Err(format!("window with id {id} was not found on an output"));
+            };
+            (monitor.output(), mapped)
+        }
+        None => {
+            let Some((mapped, output)) = state.niri.layout.focus_with_output() else {
+                return Err(String::from("no window is focused"));
+            };
+            if !mapped.is_focused() {
+                return Err(String::from("no window is focused"));
+            }
+            (output, mapped)
+        }
+    };
+    let niri = &state.niri;
+
+    state
+        .backend
+        .with_primary_renderer(|renderer| {
+            let (size, pixels) = niri
+                .capture_window_screenshot(renderer, output, mapped, show_pointer)
+                .map_err(|err| err.to_string())?;
+
+            let mut png = Vec::new();
+            let writer = std::io::Cursor::new(&mut png);
+            write_png_rgba8(writer, size.w as u32, size.h as u32, &pixels)
+                .map_err(|err| format!("error encoding screenshot PNG: {err}"))?;
+
+            Ok(Screenshot {
+                png_base64: base64::engine::general_purpose::STANDARD.encode(png),
+            })
+        })
+        .ok_or_else(|| String::from("no renderer available for screenshot"))?
 }
 
 impl State {

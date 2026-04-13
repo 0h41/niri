@@ -81,6 +81,18 @@ pub enum Request {
     FocusedOutput,
     /// Request information about the focused window.
     FocusedWindow,
+    /// Capture a PNG screenshot of a window.
+    ScreenshotWindow {
+        /// Id of the window to screenshot.
+        ///
+        /// If `None`, uses the focused window.
+        id: Option<u64>,
+        /// Whether to include the mouse pointer in the screenshot.
+        ///
+        /// The pointer will be included only if the window is currently receiving pointer input
+        /// (usually this means the pointer is on top of the window).
+        show_pointer: bool,
+    },
     /// Request picking a window and get its information.
     PickWindow,
     /// Request picking a color from the screen.
@@ -155,6 +167,8 @@ pub enum Response {
     FocusedOutput(Option<Output>),
     /// Information about the focused window.
     FocusedWindow(Option<Window>),
+    /// A captured screenshot image.
+    Screenshot(Screenshot),
     /// Information about the picked window.
     PickedWindow(Option<Window>),
     /// Information about the picked color.
@@ -181,6 +195,14 @@ pub struct Overview {
 pub struct PickedColor {
     /// Color values as red, green, blue, each ranging from 0.0 to 1.0.
     pub rgb: [f64; 3],
+}
+
+/// Captured screenshot image.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct Screenshot {
+    /// PNG bytes encoded as base64.
+    pub png_base64: String,
 }
 
 /// Actions that niri can perform.

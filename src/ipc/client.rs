@@ -1,9 +1,11 @@
 use std::io::ErrorKind;
+use std::io::Write;
 use std::iter::Peekable;
 use std::path::Path;
 use std::{env, slice};
 
 use anyhow::{anyhow, bail, Context};
+use base64::Engine as _;
 use niri_config::OutputName;
 use niri_ipc::socket::Socket;
 use niri_ipc::{
@@ -33,6 +35,10 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::Version => Request::Version,
         Msg::Outputs => Request::Outputs,
         Msg::FocusedWindow => Request::FocusedWindow,
+        Msg::ScreenshotWindow { id, show_pointer } => Request::ScreenshotWindow {
+            id: *id,
+            show_pointer: *show_pointer,
+        },
         Msg::FocusedOutput => Request::FocusedOutput,
         Msg::PickWindow => Request::PickWindow,
         Msg::PickColor => Request::PickColor,
@@ -180,6 +186,26 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
             } else {
                 println!("No window is focused.");
             }
+        }
+        Msg::ScreenshotWindow { .. } => {
+            let Response::Screenshot(screenshot) = response else {
+                bail!("unexpected response: expected Screenshot, got {response:?}");
+            };
+
+            if json {
+                let screenshot =
+                    serde_json::to_string(&screenshot).context("error formatting response")?;
+                println!("{screenshot}");
+                return Ok(());
+            }
+
+            let png = base64::engine::general_purpose::STANDARD
+                .decode(screenshot.png_base64)
+                .context("error decoding screenshot PNG")?;
+            std::io::stdout()
+                .write_all(&png)
+                .context("error writing screenshot PNG to stdout")?;
+            return Ok(());
         }
         Msg::Windows => {
             let Response::Windows(mut windows) = response else {

@@ -75,6 +75,20 @@ pub enum Msg {
     FocusedOutput,
     /// Print information about the focused window.
     FocusedWindow,
+    /// Capture the focused window as a PNG and write it to stdout.
+    ScreenshotWindow {
+        /// Id of the window to screenshot.
+        ///
+        /// If `None`, uses the focused window.
+        #[arg(long)]
+        id: Option<u64>,
+        /// Whether to include the mouse pointer in the screenshot.
+        ///
+        /// The pointer will be included only if the window is currently receiving pointer input
+        /// (usually this means the pointer is on top of the window).
+        #[arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = false)]
+        show_pointer: bool,
+    },
     /// Pick a window with the mouse and print information about it.
     PickWindow,
     /// Pick a color from the screen with the mouse.

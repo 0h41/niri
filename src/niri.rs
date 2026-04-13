@@ -5228,6 +5228,20 @@ impl Niri {
     ) -> anyhow::Result<()> {
         let _span = tracy_client::span!("Niri::screenshot_window");
 
+        let (size, pixels) =
+            self.capture_window_screenshot(renderer, output, mapped, show_pointer)?;
+
+        self.save_screenshot(size, pixels, write_to_disk, path)
+            .context("error saving screenshot")
+    }
+
+    pub fn capture_window_screenshot(
+        &self,
+        renderer: &mut GlesRenderer,
+        output: &Output,
+        mapped: &Mapped,
+        show_pointer: bool,
+    ) -> anyhow::Result<(Size<i32, Physical>, Vec<u8>)> {
         let scale = Scale::from(output.current_scale().fractional_scale());
         let alpha =
             if mapped.sizing_mode().is_fullscreen() || mapped.is_ignoring_opacity_window_rule() {
@@ -5276,8 +5290,7 @@ impl Niri {
             elements,
         )?;
 
-        self.save_screenshot(geo.size, pixels, write_to_disk, path)
-            .context("error saving screenshot")
+        Ok((geo.size, pixels))
     }
 
     pub fn save_screenshot(
