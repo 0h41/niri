@@ -70,8 +70,17 @@ if systemctl --user -q is-active niri.service; then
     exit 1
 fi
 
+import_systemd_environment() {
+    variables=$(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p')
+    if [ -n "$variables" ]; then
+        # Intentionally unquoted: split the newline-separated variable names
+        # into arguments for systemctl.
+        systemctl --user import-environment $variables
+    fi
+}
+
 systemctl --user reset-failed
-systemctl --user import-environment
+import_systemd_environment
 
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment --all
