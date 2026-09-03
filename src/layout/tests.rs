@@ -1,6 +1,6 @@
 use std::cell::{Cell, OnceCell, RefCell};
 
-use niri_config::utils::{Flag, MergeWith as _};
+use niri_config::utils::Flag;
 use niri_config::workspace::WorkspaceName;
 use niri_config::{
     CenterFocusedColumn, FloatOrInt, OutputName, Struts, TabIndicatorLength, TabIndicatorPosition,
@@ -3469,7 +3469,7 @@ fn edge_aware_struts_output_override_left_pins_first_column_without_resizing() {
     let rect_without = layout_without
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
     let width_without = layout_without
         .windows()
@@ -3499,7 +3499,7 @@ fn edge_aware_struts_output_override_left_pins_first_column_without_resizing() {
     let rect_with = layout_with
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
     let width_with = layout_with
         .windows()
@@ -3540,7 +3540,7 @@ fn edge_aware_struts_output_override_right_pins_last_column_without_resizing() {
     let rect_without = layout_without
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
     let width_without = layout_without
         .windows()
@@ -3574,7 +3574,7 @@ fn edge_aware_struts_output_override_right_pins_last_column_without_resizing() {
     let rect_with = layout_with
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
     let width_with = layout_with
         .windows()
@@ -3674,7 +3674,7 @@ fn edge_aware_struts_workspace_override_wins_over_output() {
     let rect = layout
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
 
     assert!(rect.loc.x > 0.);
@@ -3696,7 +3696,7 @@ fn edge_aware_struts_left_pins_single_column() {
     let rect_without = layout_without
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
     let width_without = layout_without
         .windows()
@@ -3721,7 +3721,7 @@ fn edge_aware_struts_left_pins_single_column() {
     let rect_with = layout_with
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
     let width_with = layout_with
         .windows()
@@ -3755,7 +3755,7 @@ fn edge_aware_struts_uses_fractional_focus_ring_width() {
     let rect = layout
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
 
     assert_eq!(rect.loc.x, 0.5);
@@ -3783,7 +3783,7 @@ fn edge_aware_struts_left_pins_full_width_first_column() {
     let rect_without = layout_without
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
 
     let ops = [
@@ -3806,7 +3806,7 @@ fn edge_aware_struts_left_pins_full_width_first_column() {
     let rect_with = layout_with
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
 
     assert!(rect_without.loc.x > 0.);
@@ -3836,7 +3836,7 @@ fn edge_aware_struts_left_pins_working_area_width_first_column() {
     let rect_without = layout_without
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
 
     let ops = [
@@ -3860,7 +3860,7 @@ fn edge_aware_struts_left_pins_working_area_width_first_column() {
     let rect_with = layout_with
         .active_monitor_ref()
         .unwrap()
-        .active_tile_visual_rectangle()
+        .active_window_visual_rectangle()
         .unwrap();
 
     assert!(rect_without.loc.x > 0.);
